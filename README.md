@@ -11,7 +11,7 @@ Bot จองสนามเทนนิส TU (bookyourcourt.psm.tu.ac.th) อ�
 ## Setup
 
 ```sh
-npm install
+bun install
 cp .env.example .env   # กรอก credentials + telegram token
 ```
 
@@ -20,21 +20,22 @@ cp .env.example .env   # กรอก credentials + telegram token
 ## คำสั่ง
 
 ```sh
-npm run dry-run              # login + แสดง plan + ตาราง slot ว่าง (ไม่จองจริง)
-npm run status               # ตาราง slot วันนี้
-npm run status -- --date 2026-07-26
-npm run run:now              # จองทันที ไม่รอ 07:00 (deadline 60s)
-npm run run:scheduled        # โหมดจริง: รอถึง fireAt แล้วยิงจนถึง deadline
-npx tsx src/main.ts book --date 2026-07-22 --hour 10 --court 3   # จอง manual 1 slot
-npm run cancel -- --account aof --code A0KK429
+bun run dry-run              # login + แสดง plan + ตาราง slot ว่าง (ไม่จองจริง)
+bun run status               # ตาราง slot วันนี้
+bun run status -- --date 2026-07-26
+bun run run:now              # จองทันที ไม่รอ 07:00 (deadline 60s)
+bun run run:scheduled        # โหมดจริง: รอถึง fireAt แล้วยิงจนถึง deadline
+bun src/main.ts book --date 2026-07-22 --hour 10 --court 3   # จอง manual 1 slot
+bun run cancel -- --account aof --code A0KK429
 ```
 
 ## ติดตั้ง scheduler (launchd, รันทุกวัน 06:55)
 
 ```sh
-cp launchd/com.aof.bookyourcourt.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.aof.bookyourcourt.plist
+./scripts/install-launchd.sh
 ```
+
+Script gen plist จาก path ปัจจุบัน แล้ว load ให้เลย — ย้าย repo ไป path อื่นก็รันซ้ำได้.
 
 เครื่องต้องตื่นตอน 06:55 — ตั้ง wake schedule:
 
