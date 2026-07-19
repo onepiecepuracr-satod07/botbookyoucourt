@@ -9,16 +9,21 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "run:scheduled": "bun src/main.ts run",
-    "run:now": "bun src/main.ts run --now",
-    "dry-run": "bun src/main.ts dry-run",
-    "status": "bun src/main.ts status",
-    "cancel": "bun src/main.ts cancel"
+    "test": "bun test",
+    "lint": "biome check src",
+    "format": "biome format --write src",
+    "run:scheduled": "bun src/index.ts run",
+    "run:now": "bun src/index.ts run --now",
+    "dry-run": "bun src/index.ts dry-run",
+    "status": "bun src/index.ts status",
+    "cancel": "bun src/index.ts cancel"
   },
   "dependencies": {
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/bun": "^1.3.14",
     "@types/node": "^26.1.1",
     "typescript": "^7.0.2"
   }

@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import type { Weekday } from './ict.js';
 
 export const COURT_IDS: Readonly<Record<number, number>> = {
   1: 39,
@@ -10,7 +8,9 @@ export const COURT_IDS: Readonly<Record<number, number>> = {
   5: 52,
 };
 
-export const COURT_NUMBERS = Object.keys(COURT_IDS).map(Number).sort((a, b) => a - b);
+export const COURT_NUMBERS = Object.keys(COURT_IDS)
+  .map(Number)
+  .sort((a, b) => a - b);
 
 export const SPORT_TYPE_TENNIS = 3;
 export const SPORT_STATION_TENNIS = 4;
@@ -24,10 +24,8 @@ const slotSchema = z.object({
   courts: z.array(courtPrefSchema).min(1),
 });
 
-const configSchema = z.object({
-  accounts: z
-    .array(z.object({ name: z.string().min(1), envPrefix: z.string().min(1) }))
-    .min(1),
+export const configSchema = z.object({
+  accounts: z.array(z.object({ name: z.string().min(1), envPrefix: z.string().min(1) })).min(1),
   schedule: z
     .array(z.object({ days: z.array(weekdaySchema).min(1), slots: z.array(slotSchema).min(1) }))
     .min(1),
@@ -48,23 +46,23 @@ export interface Credentials {
   readonly password: string;
 }
 
-export function loadConfig(path: string): Config {
-  return configSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+export interface CourtRow {
+  courtId: number;
+  courtName: string;
+  bookingDate: string;
+  [slot: `t${number}`]: number | null | undefined;
 }
 
-export function loadCredentials(config: Config, onSkip: (message: string) => void): Credentials[] {
-  const loaded: Credentials[] = [];
-  for (const { name, envPrefix } of config.accounts) {
-    const username = process.env[`${envPrefix}_USERNAME`];
-    const password = process.env[`${envPrefix}_PASSWORD`];
-    if (!username || !password) {
-      onSkip(`account "${name}" skipped: ${envPrefix}_USERNAME / ${envPrefix}_PASSWORD not set`);
-      continue;
-    }
-    loaded.push({ name, username, password });
-  }
-  if (loaded.length === 0) throw new Error('no account credentials configured in .env');
-  return loaded;
+export interface BookingView {
+  booking: {
+    bookingCode: string;
+    bookingDate: string;
+    bookingTime: string;
+    bookingStatus: string;
+    courtId: number;
+    id: number;
+  };
+  courtCourtName: string;
 }
 
 export function resolveCourtPriority(prefs: readonly (number | 'any')[]): number[] {

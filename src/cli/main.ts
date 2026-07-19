@@ -1,24 +1,20 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BookYourCourtClient } from './api.js';
-import { COURT_IDS, loadConfig, loadCredentials, type Config, type Credentials } from './config.js';
-import { executePlan } from './executor.js';
-import {
-  formatIso,
-  ictInstantToday,
-  ictToday,
-  parseIso,
-  type IctDate,
-} from './ict.js';
-import { log } from './logger.js';
-import { buildPlan, type Plan } from './planner.js';
-import { notifyTelegram } from './telegram.js';
+import { BookYourCourtClient } from '../adapters/bookyourcourt.js';
+import { log } from '../adapters/logger.js';
+import { createTelegramNotifier } from '../adapters/telegram.js';
+import { loadConfig, loadCredentials } from '../app/config.js';
+import { executePlan } from '../app/executor.js';
+import { formatIso, type IctDate, ictInstantToday, ictToday, parseIso } from '../core/ict.js';
+import { buildPlan, type Plan } from '../core/planner.js';
+import type { BookingGateway } from '../core/ports.js';
+import { COURT_IDS, type Config, type Credentials } from '../core/types.js';
 
 function loadDotEnv(path: string): void {
   if (!existsSync(path)) return;
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (match && match[1] && process.env[match[1]] === undefined) {
+    if (match?.[1] && process.env[match[1]] === undefined) {
       process.env[match[1]] = match[2];
     }
   }
@@ -36,7 +32,15 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const [command = 'run', ...rest] = argv;
-  const args: CliArgs = { command, now: false, date: null, account: null, code: null, hour: null, court: null };
+  const args: CliArgs = {
+    command,
+    now: false,
+    date: null,
+    account: null,
+    code: null,
+    hour: null,
+    court: null,
+  };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === '--now') args.now = true;
@@ -58,8 +62,8 @@ function requireValue(rest: string[], index: number, flag: string): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function authenticateAll(credentials: readonly Credentials[]): Promise<Map<string, BookYourCourtClient>> {
-  const clients = new Map<string, BookYourCourtClient>();
+async function authenticateAll(credentials: readonly Credentials[]): Promise<Map<string, BookingGateway>> {
+  const clients = new Map<string, BookingGateway>();
   await Promise.all(
     credentials.map(async (creds) => {
       const client = new BookYourCourtClient(creds.name);
@@ -71,7 +75,11 @@ async function authenticateAll(credentials: readonly Credentials[]): Promise<Map
   return clients;
 }
 
-function resolvePlan(config: Config, credentials: readonly Credentials[], dateOverride: IctDate | null): Plan | null {
+function resolvePlan(
+  config: Config,
+  credentials: readonly Credentials[],
+  dateOverride: IctDate | null,
+): Plan | null {
   if (dateOverride) {
     const today = ictToday();
     const diffDays = Math.round(
@@ -86,7 +94,8 @@ function resolvePlan(config: Config, credentials: readonly Credentials[], dateOv
 
 function describePlan(plan: Plan): string {
   const lines = plan.tasks.map(
-    (t) => `  ${t.credentials.name} → ${formatIso(plan.targetDate)} ${t.hour}:00-${t.hour + 1}:00, courts ${t.courtPriority.join(' > ')}`,
+    (t) =>
+      `  ${t.credentials.name} → ${formatIso(plan.targetDate)} ${t.hour}:00-${t.hour + 1}:00, courts ${t.courtPriority.join(' > ')}`,
   );
   return lines.join('\n');
 }
@@ -112,9 +121,7 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
     }
   }
 
-  const deadline = args.now
-    ? new Date(Date.now() + 60_000)
-    : ictInstantToday(today, config.race.deadline);
+  const deadline = args.now ? new Date(Date.now() + 60_000) : ictInstantToday(today, config.race.deadline);
 
   const results = await executePlan(
     clients,
@@ -134,7 +141,7 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
     .join('\n');
   const header = `🎾 BookYourCourt ${formatIso(plan.targetDate)}`;
   log.info(`results:\n${summary}`);
-  await notifyTelegram(config.notify.telegram, `${header}\n${summary}`);
+  await createTelegramNotifier(config.notify.telegram).notify(`${header}\n${summary}`);
 
   if (results.some((r) => !r.ok)) process.exitCode = 1;
 }
@@ -158,7 +165,7 @@ async function commandStatus(config: Config, args: CliArgs): Promise<void> {
   await printAvailability(clients, target);
 }
 
-async function printAvailability(clients: ReadonlyMap<string, BookYourCourtClient>, date: IctDate): Promise<void> {
+async function printAvailability(clients: ReadonlyMap<string, BookingGateway>, date: IctDate): Promise<void> {
   const client = clients.values().next().value;
   if (!client) throw new Error('no authenticated client');
   const today = ictToday();
@@ -199,8 +206,7 @@ async function commandBook(config: Config, args: CliArgs): Promise<void> {
     bookingCode: view.booking.bookingCode,
     status: view.booking.bookingStatus,
   });
-  await notifyTelegram(
-    config.notify.telegram,
+  await createTelegramNotifier(config.notify.telegram).notify(
     `🎾 booked ${formatIso(args.date)} ${args.hour}:00 ${view.courtCourtName} (${view.booking.bookingCode})`,
   );
 }
@@ -216,7 +222,9 @@ async function commandCancel(config: Config, args: CliArgs): Promise<void> {
   if (!client) throw new Error(`no client for "${args.account}"`);
   const ok = await client.cancelBooking(args.code);
   log.info(`cancel ${args.code}: ${ok}`);
-  await notifyTelegram(config.notify.telegram, `🎾 cancelled ${args.code} (${args.account}): ${ok}`);
+  await createTelegramNotifier(config.notify.telegram).notify(
+    `🎾 cancelled ${args.code} (${args.account}): ${ok}`,
+  );
 }
 
 async function main(): Promise<void> {
@@ -241,11 +249,13 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (error: unknown) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   log.error(`fatal: ${message}`);
   try {
     const config = loadConfig(join(process.cwd(), 'config.json'));
-    await notifyTelegram(config.notify.telegram, `🎾❌ bot crashed: ${error instanceof Error ? error.message : String(error)}`);
+    await createTelegramNotifier(config.notify.telegram).notify(
+      `🎾❌ bot crashed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   } catch {
     log.error('failed to send crash notification');
   }

@@ -1,16 +1,5 @@
-import {
-  addDays,
-  formatIso,
-  ictToday,
-  weekdayOf,
-  type IctDate,
-} from './ict.js';
-import {
-  expandSlotHours,
-  resolveCourtPriority,
-  type Config,
-  type Credentials,
-} from './config.js';
+import { addDays, formatIso, type IctDate, ictToday, weekdayOf } from './ict.js';
+import { type Config, type Credentials, expandSlotHours, resolveCourtPriority } from './types.js';
 
 export interface BookingTask {
   readonly credentials: Credentials;

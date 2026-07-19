@@ -1,11 +1,13 @@
+import { AbpError } from '../core/errors.js';
 import {
   bookingCreationTimeBody,
   bookingDateBody,
   bookingDateQuery,
   formatIso,
   type IctDate,
-} from './ict.js';
-import { SPORT_STATION_TENNIS, SPORT_TYPE_TENNIS } from './config.js';
+} from '../core/ict.js';
+import type { BookingGateway } from '../core/ports.js';
+import { type BookingView, type CourtRow, SPORT_STATION_TENNIS, SPORT_TYPE_TENNIS } from '../core/types.js';
 
 const BASE_URL = 'https://bookyourcourtapi.psm.tu.ac.th';
 
@@ -16,38 +18,7 @@ interface AbpEnvelope<T> {
   unAuthorizedRequest: boolean;
 }
 
-export class AbpError extends Error {
-  constructor(
-    readonly endpoint: string,
-    readonly abpMessage: string,
-    readonly details: string | null,
-    readonly unAuthorizedRequest: boolean,
-  ) {
-    super(`${endpoint}: ${abpMessage}${details ? ` (${details})` : ''}`);
-    this.name = 'AbpError';
-  }
-}
-
-export interface CourtRow {
-  courtId: number;
-  courtName: string;
-  bookingDate: string;
-  [slot: `t${number}`]: number | null | undefined;
-}
-
-export interface BookingView {
-  booking: {
-    bookingCode: string;
-    bookingDate: string;
-    bookingTime: string;
-    bookingStatus: string;
-    courtId: number;
-    id: number;
-  };
-  courtCourtName: string;
-}
-
-export class BookYourCourtClient {
+export class BookYourCourtClient implements BookingGateway {
   private accessToken: string | null = null;
 
   constructor(private readonly accountName: string) {}
@@ -57,21 +28,17 @@ export class BookYourCourtClient {
   }
 
   async authenticate(username: string, password: string): Promise<void> {
-    const result = await this.request<{ accessToken: string }>(
-      'POST',
-      '/api/TokenAuth/Authenticate',
-      {
-        body: {
-          userNameOrEmailAddress: username,
-          password,
-          rememberClient: false,
-          singleSignIn: false,
-          returnUrl: null,
-          captchaResponse: null,
-        },
-        skipAuth: true,
+    const result = await this.request<{ accessToken: string }>('POST', '/api/TokenAuth/Authenticate', {
+      body: {
+        userNameOrEmailAddress: username,
+        password,
+        rememberClient: false,
+        singleSignIn: false,
+        returnUrl: null,
+        captchaResponse: null,
       },
-    );
+      skipAuth: true,
+    });
     if (!result.accessToken) throw new Error(`authenticate(${this.accountName}): no accessToken in response`);
     this.accessToken = result.accessToken;
   }

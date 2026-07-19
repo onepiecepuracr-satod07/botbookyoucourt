@@ -1,8 +1,9 @@
-import { AbpError, BookYourCourtClient } from './api.js';
-import { courtNumberOf } from './config.js';
-import { formatIso, type IctDate } from './ict.js';
-import { log } from './logger.js';
-import type { BookingTask } from './planner.js';
+import { log } from '../adapters/logger.js';
+import { AbpError } from '../core/errors.js';
+import { formatIso, type IctDate } from '../core/ict.js';
+import type { BookingTask } from '../core/planner.js';
+import type { BookingGateway } from '../core/ports.js';
+import { courtNumberOf } from '../core/types.js';
 
 export interface TaskResult {
   readonly account: string;
@@ -29,7 +30,7 @@ class SameCourtCoordinator {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function runTask(
-  client: BookYourCourtClient,
+  client: BookingGateway,
   task: BookingTask,
   targetDate: IctDate,
   todayDate: IctDate,
@@ -69,13 +70,18 @@ async function runTask(
     await sleep(retryDelayMs);
   }
 
-  const result: TaskResult = { account: task.credentials.name, hour: task.hour, ok: false, reason: lastError };
+  const result: TaskResult = {
+    account: task.credentials.name,
+    hour: task.hour,
+    ok: false,
+    reason: lastError,
+  };
   log.error(`${label} FAILED after deadline`, result);
   return result;
 }
 
 export async function executePlan(
-  clients: ReadonlyMap<string, BookYourCourtClient>,
+  clients: ReadonlyMap<string, BookingGateway>,
   tasks: readonly BookingTask[],
   targetDate: IctDate,
   todayDate: IctDate,
