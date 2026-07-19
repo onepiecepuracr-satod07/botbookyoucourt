@@ -20,12 +20,24 @@ cat > "$DEST" <<PLIST
         <string>${ROOT}/scripts/run.sh</string>
     </array>
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>6</integer>
-        <key>Minute</key>
-        <integer>55</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Weekday</key>
+            <integer>0</integer>
+            <key>Hour</key>
+            <integer>6</integer>
+            <key>Minute</key>
+            <integer>55</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>1</integer>
+            <key>Hour</key>
+            <integer>6</integer>
+            <key>Minute</key>
+            <integer>55</integer>
+        </dict>
+    </array>
     <key>StandardOutPath</key>
     <string>${ROOT}/logs/launchd.out.log</string>
     <key>StandardErrorPath</key>
