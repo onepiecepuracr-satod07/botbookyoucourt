@@ -16,7 +16,7 @@ export function buildPlan(
   config: Config,
   credentials: readonly Credentials[],
   today: IctDate = ictToday(),
-  advanceDays = 7,
+  advanceDays = 6,
 ): Plan | null {
   const targetDate = addDays(today, advanceDays);
   const weekday = weekdayOf(targetDate);
