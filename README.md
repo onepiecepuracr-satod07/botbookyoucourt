@@ -29,7 +29,7 @@ bun src/index.ts book --date 2026-07-22 --hour 10 --court 3   # จอง manual
 bun run cancel -- --account aof --code A0KK429
 ```
 
-## ติดตั้ง scheduler (launchd, รันทุกวัน 06:55)
+## ติดตั้ง scheduler (launchd, รัน Sun + Mon 06:55)
 
 ```sh
 ./scripts/install-launchd.sh
@@ -37,13 +37,15 @@ bun run cancel -- --account aof --code A0KK429
 
 Script gen plist จาก path ปัจจุบัน แล้ว load ให้เลย — ย้าย repo ไป path อื่นก็รันซ้ำได้.
 
-เครื่องต้องตื่นตอน 06:55 — ตั้ง wake schedule:
+เครื่องต้องตื่นตอน 06:55 — ตั้ง wake schedule (Sun + Mon):
 
 ```sh
-sudo pmset repeat wakeorpoweron MTWRFSU 06:53:00
+sudo pmset repeat wakeorpoweron MU 06:53:00
 ```
 
-bot จะ exit เองถ้าวันเป้าหมาย (วันนี้+7) ไม่อยู่ใน config
+**Window:** slot เปิด 07:00 ICT สำหรับวัน **+6** (วันนี้จองล่วงหน้าได้ถึง today+6) → `buildPlan` default `advanceDays=6`. bot จะ exit เองถ้าวันเป้าหมาย (วันนี้+6) ไม่อยู่ใน config.
+
+จองวันเล่นต้อง run ก่อน 6 วัน → คอร์ท **เสาร์ = run วันอาทิตย์**, คอร์ท **อาทิตย์ = run วันจันทร์** (จึงตั้ง launchd ไว้ Sun + Mon).
 
 ## Logs
 
@@ -84,13 +86,13 @@ Flow การจอง:
 
 ```mermaid
 sequenceDiagram
-  participant L as launchd (06:55)
+  participant L as launchd (Sun+Mon 06:55)
   participant C as cli/main
   participant P as planner (core)
   participant E as executor (app)
   participant G as BookingGateway (adapter)
   L->>C: run
-  C->>P: buildPlan(config, วันนี้+7)
+  C->>P: buildPlan(config, วันนี้+6)
   P-->>C: BookingTask[]
   C->>G: authenticate() ทุก account
   C->>C: รอถึง fireAt (07:00)
