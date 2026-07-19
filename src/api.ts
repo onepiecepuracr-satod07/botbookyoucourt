@@ -2,6 +2,7 @@ import {
   bookingCreationTimeBody,
   bookingDateBody,
   bookingDateQuery,
+  formatIso,
   type IctDate,
 } from './ict.js';
 import { SPORT_STATION_TENNIS, SPORT_TYPE_TENNIS } from './config.js';
@@ -87,9 +88,10 @@ export class BookYourCourtClient {
   }
 
   async createBooking(date: IctDate, todayDate: IctDate, hour: number, courtId: number): Promise<number> {
+    const isSameDay = formatIso(date) === formatIso(todayDate);
     return this.request<number>('POST', '/api/services/app/Bookings/CreateOrEdit', {
       body: {
-        today: 2,
+        today: isSameDay ? 1 : 2,
         bookingDate: bookingDateBody(date),
         bookingTime: `${String(hour).padStart(2, '0')}:00`,
         bookingCreationTime: bookingCreationTimeBody(todayDate),
