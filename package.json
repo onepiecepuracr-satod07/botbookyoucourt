@@ -1,0 +1,25 @@
+{
+  "name": "botbookyoucourt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "run:scheduled": "bun src/main.ts run",
+    "run:now": "bun src/main.ts run --now",
+    "dry-run": "bun src/main.ts dry-run",
+    "status": "bun src/main.ts status",
+    "cancel": "bun src/main.ts cancel"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

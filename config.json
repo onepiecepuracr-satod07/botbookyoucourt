@@ -1,0 +1,18 @@
+{
+  "accounts": [
+    { "name": "aof", "envPrefix": "TU_A" },
+    { "name": "friend", "envPrefix": "TU_B" }
+  ],
+  "schedule": [
+    {
+      "days": ["sat", "sun"],
+      "slots": [{ "time": "17:00-19:00", "courts": [5, 4, "any"] }]
+    }
+  ],
+  "race": {
+    "fireAt": "06:59:58",
+    "deadline": "07:02:00",
+    "retryDelayMs": 500
+  },
+  "notify": { "telegram": true }
+}

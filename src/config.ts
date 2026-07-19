@@ -1,0 +1,98 @@
+import { readFileSync } from 'node:fs';
+import { z } from 'zod';
+import type { Weekday } from './ict.js';
+
+export const COURT_IDS: Readonly<Record<number, number>> = {
+  1: 39,
+  2: 40,
+  3: 41,
+  4: 51,
+  5: 52,
+};
+
+export const COURT_NUMBERS = Object.keys(COURT_IDS).map(Number).sort((a, b) => a - b);
+
+export const SPORT_TYPE_TENNIS = 3;
+export const SPORT_STATION_TENNIS = 4;
+
+const weekdaySchema = z.enum(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+
+const courtPrefSchema = z.union([z.literal('any'), z.number().int().min(1).max(5)]);
+
+const slotSchema = z.object({
+  time: z.string().regex(/^\d{2}:00-\d{2}:00$/, 'expected HH:00-HH:00'),
+  courts: z.array(courtPrefSchema).min(1),
+});
+
+const configSchema = z.object({
+  accounts: z
+    .array(z.object({ name: z.string().min(1), envPrefix: z.string().min(1) }))
+    .min(1),
+  schedule: z
+    .array(z.object({ days: z.array(weekdaySchema).min(1), slots: z.array(slotSchema).min(1) }))
+    .min(1),
+  race: z.object({
+    fireAt: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
+    deadline: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
+    retryDelayMs: z.number().int().min(50),
+  }),
+  notify: z.object({ telegram: z.boolean() }),
+});
+
+export type Config = z.infer<typeof configSchema>;
+export type SlotConfig = z.infer<typeof slotSchema>;
+
+export interface Credentials {
+  readonly name: string;
+  readonly username: string;
+  readonly password: string;
+}
+
+export function loadConfig(path: string): Config {
+  return configSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+}
+
+export function loadCredentials(config: Config, onSkip: (message: string) => void): Credentials[] {
+  const loaded: Credentials[] = [];
+  for (const { name, envPrefix } of config.accounts) {
+    const username = process.env[`${envPrefix}_USERNAME`];
+    const password = process.env[`${envPrefix}_PASSWORD`];
+    if (!username || !password) {
+      onSkip(`account "${name}" skipped: ${envPrefix}_USERNAME / ${envPrefix}_PASSWORD not set`);
+      continue;
+    }
+    loaded.push({ name, username, password });
+  }
+  if (loaded.length === 0) throw new Error('no account credentials configured in .env');
+  return loaded;
+}
+
+export function resolveCourtPriority(prefs: readonly (number | 'any')[]): number[] {
+  const ordered: number[] = [];
+  for (const pref of prefs) {
+    if (pref === 'any') {
+      for (const n of COURT_NUMBERS) if (!ordered.includes(n)) ordered.push(n);
+    } else if (!ordered.includes(pref)) {
+      ordered.push(pref);
+    }
+  }
+  return ordered.map((n) => {
+    const id = COURT_IDS[n];
+    if (id === undefined) throw new Error(`unknown court number ${n}`);
+    return id;
+  });
+}
+
+export function courtNumberOf(courtId: number): number {
+  const entry = Object.entries(COURT_IDS).find(([, id]) => id === courtId);
+  if (!entry) throw new Error(`unknown courtId ${courtId}`);
+  return Number(entry[0]);
+}
+
+export function expandSlotHours(slot: SlotConfig): number[] {
+  const [startRaw, endRaw] = slot.time.split('-') as [string, string];
+  const start = Number(startRaw.slice(0, 2));
+  const end = Number(endRaw.slice(0, 2));
+  if (end <= start) throw new Error(`invalid slot range "${slot.time}"`);
+  return Array.from({ length: end - start }, (_, i) => start + i);
+}
