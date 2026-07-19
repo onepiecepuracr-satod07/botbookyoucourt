@@ -31,6 +31,16 @@ describe('buildPlan', () => {
     expect(plan?.tasks[0]?.courtPriority[0]).toBe(COURT_IDS[3]);
   });
 
+  test('defaults to booking 6 days ahead (venue window opens +6 at 07:00)', () => {
+    // monday 2026-07-13, default +6 -> 2026-07-19 (Sunday)
+    const sundayConfig: Config = {
+      ...config(),
+      schedule: [{ days: ['sun'], slots: [{ time: '18:00-19:00', courts: [3] }] }],
+    };
+    const plan = buildPlan(sundayConfig, [creds('a')], monday);
+    expect(plan?.targetDate).toEqual({ year: 2026, month: 7, day: 19 });
+  });
+
   test('returns null when target weekday has no schedule entry', () => {
     // +8 -> Tuesday, not in schedule
     expect(buildPlan(config(), [creds('a'), creds('b')], monday, 8)).toBeNull();
