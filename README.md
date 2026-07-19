@@ -25,7 +25,7 @@ bun run status               # ตาราง slot วันนี้
 bun run status -- --date 2026-07-26
 bun run run:now              # จองทันที ไม่รอ 07:00 (deadline 60s)
 bun run run:scheduled        # โหมดจริง: รอถึง fireAt แล้วยิงจนถึง deadline
-bun src/main.ts book --date 2026-07-22 --hour 10 --court 3   # จอง manual 1 slot
+bun src/index.ts book --date 2026-07-22 --hour 10 --court 3   # จอง manual 1 slot
 bun run cancel -- --account aof --code A0KK429
 ```
 
@@ -48,3 +48,57 @@ bot จะ exit เองถ้าวันเป้าหมาย (วัน�
 ## Logs
 
 `logs/YYYY-MM-DD.log` + Telegram แจ้งผลทุกครั้ง (สำเร็จ/ล้มเหลว/crash)
+
+## Architecture
+
+Hexagonal-lite — แยกตาม role, dependency ไหลทางเดียว `cli → app → core`. รายละเอียด + กฎ dependency ดู [CONTRIBUTING.md](CONTRIBUTING.md).
+
+```mermaid
+flowchart TD
+  CLI["cli/main.ts<br/>(composition root)"]
+  subgraph app["app/ (orchestrate)"]
+    EX[executor.ts]
+    CFG[config.ts]
+  end
+  subgraph core["core/ (pure, no I/O)"]
+    PL[planner.ts]
+    PORTS["ports.ts<br/>BookingGateway · Notifier"]
+    TY[types.ts]
+    ICT[ict.ts]
+  end
+  subgraph adapters["adapters/ (I/O)"]
+    BYC["bookyourcourt.ts<br/>implements BookingGateway"]
+    TG["telegram.ts<br/>implements Notifier"]
+    LOG[logger.ts]
+  end
+
+  CLI --> EX & CFG & PL & BYC & TG
+  EX --> PORTS & TY & ICT
+  PL --> TY & ICT
+  BYC -.implements.-> PORTS
+  TG -.implements.-> PORTS
+  EX --> LOG
+```
+
+Flow การจอง:
+
+```mermaid
+sequenceDiagram
+  participant L as launchd (06:55)
+  participant C as cli/main
+  participant P as planner (core)
+  participant E as executor (app)
+  participant G as BookingGateway (adapter)
+  L->>C: run
+  C->>P: buildPlan(config, วันนี้+7)
+  P-->>C: BookingTask[]
+  C->>G: authenticate() ทุก account
+  C->>C: รอถึง fireAt (07:00)
+  C->>E: executePlan(tasks, deadline)
+  loop จนจองได้ / ถึง deadline
+    E->>G: createBooking(court)
+    G-->>E: bookingId / error
+  end
+  E-->>C: TaskResult[]
+  C->>C: notify Telegram + log
+```
