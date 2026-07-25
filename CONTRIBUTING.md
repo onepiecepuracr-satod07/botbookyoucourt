@@ -28,11 +28,13 @@ src/
     ict.ts        # date/time ICT (+7)
     types.ts      # config schema, court map, pure helpers
     planner.ts    # buildPlan: config + วันที่ → BookingTask[]
-    ports.ts      # BookingGateway, Notifier (interface)
+    marker.ts     # pendingTasks / mergeMarks (idempotent fallback) + BookingMark schema
+    ports.ts      # BookingGateway, Notifier, BookingStore (interface)
     errors.ts     # AbpError
   adapters/   # implement port, คุย external
     bookyourcourt.ts  # BookingGateway ← HTTP client
     telegram.ts       # Notifier ← Telegram API
+    booking-store.ts  # BookingStore ← state/booked-<date>.json
     logger.ts         # file + console
   app/        # orchestrate
     config.ts     # loadConfig / loadCredentials (file + env I/O)
