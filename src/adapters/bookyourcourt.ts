@@ -21,7 +21,10 @@ interface AbpEnvelope<T> {
 export class BookYourCourtClient implements BookingGateway {
   private accessToken: string | null = null;
 
-  constructor(private readonly accountName: string) {}
+  constructor(
+    private readonly accountName: string,
+    private readonly requestTimeoutMs = 8000,
+  ) {}
 
   get account(): string {
     return this.accountName;
@@ -88,14 +91,27 @@ export class BookYourCourtClient implements BookingGateway {
     if (!options.skipAuth && !this.accessToken) {
       throw new Error(`${this.accountName}: not authenticated`);
     }
-    const response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.skipAuth ? {} : { Authorization: `Bearer ${this.accessToken}` }),
-      },
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.skipAuth ? {} : { Authorization: `Bearer ${this.accessToken}` }),
+        },
+        signal: controller.signal,
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`${path}: request timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw error instanceof Error ? new Error(`${path}: ${error.message}`) : error;
+    } finally {
+      clearTimeout(timer);
+    }
     const text = await response.text();
     let envelope: AbpEnvelope<T>;
     try {

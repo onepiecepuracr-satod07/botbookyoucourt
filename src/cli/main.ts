@@ -4,6 +4,12 @@ import { createFileBookingStore } from '../adapters/booking-store.js';
 import { BookYourCourtClient } from '../adapters/bookyourcourt.js';
 import { log } from '../adapters/logger.js';
 import { createTelegramNotifier } from '../adapters/telegram.js';
+import {
+  type AuthOptions,
+  authenticateAll,
+  authenticateAvailable,
+  type GatewayFactory,
+} from '../app/auth.js';
 import { loadConfig, loadCredentials } from '../app/config.js';
 import { executePlan } from '../app/executor.js';
 import { formatIso, type IctDate, ictInstantToday, ictToday, parseIso } from '../core/ict.js';
@@ -64,17 +70,15 @@ function requireValue(rest: string[], index: number, flag: string): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function authenticateAll(credentials: readonly Credentials[]): Promise<Map<string, BookingGateway>> {
-  const clients = new Map<string, BookingGateway>();
-  await Promise.all(
-    credentials.map(async (creds) => {
-      const client = new BookYourCourtClient(creds.name);
-      await client.authenticate(creds.username, creds.password);
-      log.info(`authenticated ${creds.name}`);
-      clients.set(creds.name, client);
-    }),
-  );
-  return clients;
+const gatewayFactory: GatewayFactory = (name, requestTimeoutMs) =>
+  new BookYourCourtClient(name, requestTimeoutMs);
+
+function authOptions(config: Config): AuthOptions {
+  return {
+    requestTimeoutMs: config.race.requestTimeoutMs,
+    attempts: config.race.authAttempts,
+    baseDelayMs: config.race.authRetryDelayMs,
+  };
 }
 
 function resolvePlan(
@@ -130,7 +134,15 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
   log.info(`plan:\n${describePlan({ targetDate: plan.targetDate, tasks: pending })}`);
 
   const pendingCreds = credentials.filter((c) => pending.some((t) => t.credentials.name === c.name));
-  const clients = await authenticateAll(pendingCreds);
+  const { clients, failed } = await authenticateAvailable(pendingCreds, gatewayFactory, authOptions(config));
+  if (clients.size === 0) {
+    const detail = failed.map((f) => `${f.name} (${f.reason})`).join(', ');
+    throw new Error(`all account authentications failed: ${detail}`);
+  }
+  const bookable = pending.filter((t) => clients.has(t.credentials.name));
+  if (failed.length > 0) {
+    log.warn(`proceeding without ${failed.length} account(s): ${failed.map((f) => f.name).join(', ')}`);
+  }
 
   if (!args.now) {
     const fireAt = ictInstantToday(today, config.race.fireAt);
@@ -145,7 +157,7 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
 
   const results = await executePlan(
     clients,
-    pending,
+    bookable,
     plan.targetDate,
     today,
     deadline,
@@ -165,17 +177,18 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
   }
   if (newMarks.length > 0) await store.save(plan.targetDate, mergeMarks(marks, newMarks));
 
-  const summary = results
-    .map((r) =>
+  const summary = [
+    ...results.map((r) =>
       r.ok
         ? `✅ ${r.account} ${r.hour}:00 court ${r.courtNumber} (${r.bookingCode})`
         : `❌ ${r.account} ${r.hour}:00 — ${r.reason}`,
-    )
-    .join('\n');
+    ),
+    ...failed.map((f) => `⚠️ ${f.name} — auth failed after retries: ${f.reason}`),
+  ].join('\n');
   log.info(`results:\n${summary}`);
   await notifier.notify(`${header}\n${summary}`);
 
-  if (results.some((r) => !r.ok)) process.exitCode = 1;
+  if (results.some((r) => !r.ok) || failed.length > 0) process.exitCode = 1;
 }
 
 async function commandDryRun(config: Config, args: CliArgs): Promise<void> {
@@ -186,13 +199,13 @@ async function commandDryRun(config: Config, args: CliArgs): Promise<void> {
     return;
   }
   log.info(`DRY RUN — would execute:\n${describePlan(plan)}`);
-  const clients = await authenticateAll(credentials);
+  const clients = await authenticateAll(credentials, gatewayFactory, authOptions(config));
   await printAvailability(clients, plan.targetDate);
 }
 
 async function commandStatus(config: Config, args: CliArgs): Promise<void> {
   const credentials = loadCredentials(config, log.warn).slice(0, 1);
-  const clients = await authenticateAll(credentials);
+  const clients = await authenticateAll(credentials, gatewayFactory, authOptions(config));
   const target = args.date ?? ictToday();
   await printAvailability(clients, target);
 }
@@ -225,7 +238,7 @@ async function commandBook(config: Config, args: CliArgs): Promise<void> {
   if (!creds) throw new Error(`unknown account "${args.account ?? ''}"`);
   const courtId = COURT_IDS[args.court];
   if (courtId === undefined) throw new Error(`unknown court number ${args.court}`);
-  const clients = await authenticateAll([creds]);
+  const clients = await authenticateAll([creds], gatewayFactory, authOptions(config));
   const client = clients.get(creds.name);
   if (!client) throw new Error(`no client for "${creds.name}"`);
   const bookingId = await client.createBooking(args.date, ictToday(), args.hour, courtId);
@@ -249,7 +262,7 @@ async function commandCancel(config: Config, args: CliArgs): Promise<void> {
   }
   const credentials = loadCredentials(config, log.warn).filter((c) => c.name === args.account);
   if (credentials.length === 0) throw new Error(`unknown account "${args.account}"`);
-  const clients = await authenticateAll(credentials);
+  const clients = await authenticateAll(credentials, gatewayFactory, authOptions(config));
   const client = clients.get(args.account);
   if (!client) throw new Error(`no client for "${args.account}"`);
   const ok = await client.cancelBooking(args.code);
