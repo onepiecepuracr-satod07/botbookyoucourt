@@ -1,11 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createFileBookingStore } from '../adapters/booking-store.js';
 import { BookYourCourtClient } from '../adapters/bookyourcourt.js';
 import { log } from '../adapters/logger.js';
 import { createTelegramNotifier } from '../adapters/telegram.js';
 import { loadConfig, loadCredentials } from '../app/config.js';
 import { executePlan } from '../app/executor.js';
 import { formatIso, type IctDate, ictInstantToday, ictToday, parseIso } from '../core/ict.js';
+import { type BookingMark, mergeMarks, pendingTasks } from '../core/marker.js';
 import { buildPlan, type Plan } from '../core/planner.js';
 import type { BookingGateway } from '../core/ports.js';
 import { COURT_IDS, type Config, type Credentials } from '../core/types.js';
@@ -101,16 +103,34 @@ function describePlan(plan: Plan): string {
 }
 
 async function commandRun(config: Config, args: CliArgs): Promise<void> {
+  const store = createFileBookingStore(join(process.cwd(), 'state'));
+  const notifier = createTelegramNotifier(config.notify.telegram);
   const credentials = loadCredentials(config, log.warn);
   const plan = resolvePlan(config, credentials, args.date);
   const today = ictToday();
   if (!plan || plan.tasks.length === 0) {
-    log.info(`no schedule entry for target day (today ${formatIso(today)} +7) — exiting`);
+    log.info(`no schedule entry for target day (today ${formatIso(today)} +6) — exiting`);
     return;
   }
-  log.info(`plan:\n${describePlan(plan)}`);
 
-  const clients = await authenticateAll(credentials);
+  const header = `🎾 BookYourCourt ${formatIso(plan.targetDate)}`;
+  const marks = await store.load(plan.targetDate);
+  const pending = pendingTasks(plan.tasks, marks);
+
+  if (pending.length === 0) {
+    const summary = marks
+      .map((m) => `✅ ${m.account} ${m.hour}:00 court ${m.courtNumber} (${m.bookingCode}) [already booked]`)
+      .join('\n');
+    log.info(`all tasks already booked for ${formatIso(plan.targetDate)} — skipping`);
+    await notifier.notify(`${header}\n${summary}`);
+    return;
+  }
+
+  if (marks.length > 0) log.info(`skipping ${marks.length} already-booked task(s)`);
+  log.info(`plan:\n${describePlan({ targetDate: plan.targetDate, tasks: pending })}`);
+
+  const pendingCreds = credentials.filter((c) => pending.some((t) => t.credentials.name === c.name));
+  const clients = await authenticateAll(pendingCreds);
 
   if (!args.now) {
     const fireAt = ictInstantToday(today, config.race.fireAt);
@@ -125,12 +145,25 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
 
   const results = await executePlan(
     clients,
-    plan.tasks,
+    pending,
     plan.targetDate,
     today,
     deadline,
     config.race.retryDelayMs,
   );
+
+  const newMarks: BookingMark[] = [];
+  for (const r of results) {
+    if (r.ok && r.courtNumber !== undefined && r.bookingCode !== undefined) {
+      newMarks.push({
+        account: r.account,
+        hour: r.hour,
+        courtNumber: r.courtNumber,
+        bookingCode: r.bookingCode,
+      });
+    }
+  }
+  if (newMarks.length > 0) await store.save(plan.targetDate, mergeMarks(marks, newMarks));
 
   const summary = results
     .map((r) =>
@@ -139,9 +172,8 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
         : `❌ ${r.account} ${r.hour}:00 — ${r.reason}`,
     )
     .join('\n');
-  const header = `🎾 BookYourCourt ${formatIso(plan.targetDate)}`;
   log.info(`results:\n${summary}`);
-  await createTelegramNotifier(config.notify.telegram).notify(`${header}\n${summary}`);
+  await notifier.notify(`${header}\n${summary}`);
 
   if (results.some((r) => !r.ok)) process.exitCode = 1;
 }

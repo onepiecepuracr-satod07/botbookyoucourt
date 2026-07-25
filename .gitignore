@@ -1,6 +1,7 @@
 node_modules/
 dist/
 logs/
+state/
 .env
 *.har
 .DS_Store

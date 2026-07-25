@@ -1,4 +1,5 @@
 import type { IctDate } from './ict.js';
+import type { BookingMark } from './marker.js';
 import type { BookingView, CourtRow } from './types.js';
 
 export interface BookingGateway {
@@ -8,6 +9,11 @@ export interface BookingGateway {
   createBooking(date: IctDate, todayDate: IctDate, hour: number, courtId: number): Promise<number>;
   getBooking(id: number): Promise<BookingView>;
   cancelBooking(bookingCode: string): Promise<boolean>;
+}
+
+export interface BookingStore {
+  load(targetDate: IctDate): Promise<BookingMark[]>;
+  save(targetDate: IctDate, marks: readonly BookingMark[]): Promise<void>;
 }
 
 export interface Notifier {
