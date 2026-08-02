@@ -12,7 +12,10 @@
   "race": {
     "fireAt": "06:59:58",
     "deadline": "07:02:00",
-    "retryDelayMs": 500
+    "retryDelayMs": 500,
+    "requestTimeoutMs": 8000,
+    "authAttempts": 3,
+    "authRetryDelayMs": 300
   },
   "notify": { "telegram": true }
 }

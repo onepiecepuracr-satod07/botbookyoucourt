@@ -33,6 +33,9 @@ export const configSchema = z.object({
     fireAt: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
     deadline: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
     retryDelayMs: z.number().int().min(50),
+    requestTimeoutMs: z.number().int().min(500).default(8000),
+    authAttempts: z.number().int().min(1).default(3),
+    authRetryDelayMs: z.number().int().min(50).default(300),
   }),
   notify: z.object({ telegram: z.boolean() }),
 });

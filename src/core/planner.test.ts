@@ -10,7 +10,14 @@ const config = (): Config => ({
     { name: 'b', envPrefix: 'B' },
   ],
   schedule: [{ days: ['mon'], slots: [{ time: '18:00-20:00', courts: [3, 'any'] }] }],
-  race: { fireAt: '07:00:00', deadline: '07:00:10', retryDelayMs: 100 },
+  race: {
+    fireAt: '07:00:00',
+    deadline: '07:00:10',
+    retryDelayMs: 100,
+    requestTimeoutMs: 8000,
+    authAttempts: 3,
+    authRetryDelayMs: 300,
+  },
   notify: { telegram: false },
 });
 
