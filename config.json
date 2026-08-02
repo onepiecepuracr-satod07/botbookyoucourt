@@ -1,12 +1,11 @@
 {
   "accounts": [
-    { "name": "aof", "envPrefix": "TU_A" },
-    { "name": "macco", "envPrefix": "TU_B" }
+    { "name": "aof", "envPrefix": "TU_A" }
   ],
   "schedule": [
     {
       "days": ["sat", "sun"],
-      "slots": [{ "time": "17:00-19:00", "courts": [5, 4, "any"] }]
+      "slots": [{ "time": "18:00-19:00", "courts": [5, 4, "any"] }]
     }
   ],
   "race": {
