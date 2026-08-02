@@ -35,6 +35,8 @@ TU API `bookyourcourtapi.psm.tu.ac.th` (49.229.83.38) **บล็อก IP ต�
 
 ## 3. Setup บน Mac mini
 
+> ⚠️ รันบนเครื่องส่วนตัวเท่านั้น — เครื่องทำงานที่มี corporate MITM proxy (Netskope/Zscaler) จะทำให้ทุก HTTPS request ล้ม (`self signed certificate in certificate chain`) รวมถึง Telegram alert → fail เงียบ. และ laptop ที่หลับได้จะยิง launchd สายจนเลย deadline.
+
 ทำครั้งเดียว:
 
 ```sh
@@ -112,6 +114,9 @@ marker: ลบ `state/booked-<date>.json` ถ้าต้องการบั�
 | Telegram เงียบเช้า Sun/Mon | เหมือนข้างบน (bot ไม่ได้รัน) | ดู `launchd.err.log`, `launchctl list` |
 | `run` ค้างนาน ไม่มี log | connect API timeout = ไม่ได้อยู่ IP ไทย / เน็ตหลุด | ยืนยัน `curl -m10 https://bookyourcourtapi.psm.tu.ac.th/` ได้ 302 |
 | `❌ ... token` ทุก account | creds ใน `.env` ผิด/หมดอายุ | อัปเดต `.env`, ทดสอบ `bun src/index.ts status` |
+| `self signed certificate in certificate chain` ทุก request (TU + Telegram พร้อมกัน) | เครื่องมี corporate MITM proxy (เช่น Netskope/Zscaler) — bun ไม่ trust CA ของ proxy | อย่ารัน bot บนเครื่องทำงาน; ถ้าจำเป็นชั่วคราว: export CA ของ proxy เป็น .pem แล้วตั้ง `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` ใน plist/run.sh |
+| `CreateOrEdit: Internal server error` ทั้งที่ auth ผ่าน | user TU ของ account นั้นหมดอายุ (ไม่มีสิทธิ์จอง) | ต่ออายุ user กับ TU; ระหว่างรอ เอา account ออกจาก `config.json` กัน bot ยิง 500 ฟรี |
+| log `no attempt made` | run เริ่มหลัง `deadline` 07:02 (เครื่องหลับแล้ว launchd ยิงตอนตื่น) | เช็ค pmset (แถวล่าง) + ต้องมี fallback agent 07:10 (`launchctl list \| grep botbook` ต้องเห็น 2 ตัว) |
 | จองไม่ได้แต่ไม่มี error ชัด | slot ถูกคนอื่นแย่ง (race แพ้) | fallback 07:10 เก็บตก; ถ้ายัง = จองมือ |
 | เครื่องหลับตอน 06:55 | pmset ไม่ได้ตั้ง / เครื่องรีบูตแล้วไม่ auto-login | `pmset -g \| grep sleep` ต้อง 0; เปิด auto-login |
 | agent ไม่ทำงานหลังรีบูต | ไม่ได้ auto-login | เปิด auto-login |
