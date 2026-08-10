@@ -60,6 +60,12 @@ write_plist() {
 }
 
 echo "==> launchd agents"
+LEGACY="$LA/com.aof.bookyourcourt.plist"
+if [ -f "$LEGACY" ]; then
+  launchctl unload -w "$LEGACY" 2>/dev/null || true
+  rm -f "$LEGACY"
+  echo "   removed legacy com.aof.bookyourcourt (collided with race at 06:55)"
+fi
 write_plist "$RACE"     6 55 run
 write_plist "$FALLBACK" 7 10 run --now
 

@@ -27,6 +27,7 @@ TU API `bookyourcourtapi.psm.tu.ac.th` (49.229.83.38) **บล็อก IP ต�
 | `com.botbookyoucourt.fallback` | Sun,Mon 07:10 | `run --now` | เก็บตกถ้า race แพ้ (demand ต่ำ คอร์ตมักว่างถึง ~08:24) |
 
 กลไกกันพลาด:
+- **Single-instance lock** — `run.sh` จับ `state/.run.lock` (`mkdir` atomic + เช็ค pid stale) ก่อนรัน. ถ้ามี instance อื่นถืออยู่ → `exit 0` เงียบ (ไม่ ping healthcheck fail). กันเคส 2 process ยิงชนกัน (agent ซ้ำ / fallback ทับ race ที่ยังค้าง) ที่จะทำให้บอทจองแข่งกันเองจน quota เต็ม แล้วรายงาน false-`❌`.
 - **Idempotent marker** — จองสำเร็จ → เขียน `state/booked-<targetDate>.json` เก็บ `(account, hour, bookingCode)`. `run` โหลด marker ก่อน → skip task ที่ได้แล้ว, auth เฉพาะ account ที่ค้าง. fallback จึงไม่จองซ้ำ/ไม่แจ้ง false-❌.
 - **Telegram** — แจ้งผลทุกครั้ง (✅/❌) + แจ้ง crash. เงียบ = ผิดปกติ.
 - **Dead-man switch (healthchecks.io)** — `run.sh` ping `/start` + success + `/$code`. ถ้าเครื่องตาย/agent ไม่ยิง → healthchecks ไม่ได้ ping ตาม cron → เด้งเตือนเอง.
@@ -84,7 +85,9 @@ bun src/index.ts status
 
 ```sh
 # ดู agent ที่ load + สถานะ
-launchctl list | grep botbookyoucourt
+launchctl list | grep botbookyoucourt              # ใช้ได้เฉพาะใน GUI/Aqua session
+# ⚠️ ผ่าน ssh: launchctl list เห็นเปล่า (คนละ session domain) — ใช้ gui domain แทน
+launchctl print gui/$(id -u) | grep -iE 'book|=> (en|dis)abled'
 
 # log
 tail -f logs/$(date +%F).log          # log แอปรายวัน
@@ -118,6 +121,7 @@ marker: ลบ `state/booked-<date>.json` ถ้าต้องการบั�
 | `CreateOrEdit: Internal server error` ทั้งที่ auth ผ่าน | user TU ของ account นั้นหมดอายุ (ไม่มีสิทธิ์จอง) | ต่ออายุ user กับ TU; ระหว่างรอ เอา account ออกจาก `config.json` กัน bot ยิง 500 ฟรี |
 | log `no attempt made` | run เริ่มหลัง `deadline` 07:02 (เครื่องหลับแล้ว launchd ยิงตอนตื่น) | เช็ค pmset (แถวล่าง) + ต้องมี fallback agent 07:10 (`launchctl list \| grep botbook` ต้องเห็น 2 ตัว) |
 | จองไม่ได้แต่ไม่มี error ชัด | slot ถูกคนอื่นแย่ง (race แพ้) | fallback 07:10 เก็บตก; ถ้ายัง = จองมือ |
+| log ซ้ำทุกบรรทัด 2 รอบ / จองสำเร็จแล้วยังได้ `❌ FAILED` | มี launchd agent ซ้ำยิงเวลาเดียวกัน → 2 instance ชนกันเอง จน quota เต็ม (issue #4) | `launchctl print gui/$(id -u) \| grep book` ต้องเหลือแค่ `race`+`fallback`; ลบ agent เกิน (`launchctl bootout gui/$(id -u)/<label>` + `rm ~/Library/LaunchAgents/<label>.plist`). `run.sh` มี lock กันชั้นสองแล้ว |
 | เครื่องหลับตอน 06:55 | pmset ไม่ได้ตั้ง / เครื่องรีบูตแล้วไม่ auto-login | `pmset -g \| grep sleep` ต้อง 0; เปิด auto-login |
 | agent ไม่ทำงานหลังรีบูต | ไม่ได้ auto-login | เปิด auto-login |
 
