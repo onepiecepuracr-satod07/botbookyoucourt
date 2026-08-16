@@ -125,6 +125,8 @@ export class BookYourCourtClient implements BookingGateway {
         envelope.error?.message ?? `HTTP ${response.status}`,
         envelope.error?.details ?? null,
         envelope.unAuthorizedRequest,
+        envelope.error?.code ?? null,
+        response.status,
       );
     }
     return envelope.result;

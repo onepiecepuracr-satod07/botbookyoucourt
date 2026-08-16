@@ -45,7 +45,7 @@ write_plist() {
     for a in "$@"; do echo "    <string>$a</string>"; done
     echo '  </array>'
     echo '  <key>StartCalendarInterval</key><array>'
-    for wd in 0 1; do
+    for wd in 0 1 2; do
       echo "    <dict><key>Weekday</key><integer>$wd</integer><key>Hour</key><integer>$hour</integer><key>Minute</key><integer>$minute</integer></dict>"
     done
     echo '  </array>'
@@ -56,7 +56,7 @@ write_plist() {
   } > "$plist"
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
-  echo "   loaded $label ($hour:$minute Sun,Mon)"
+  echo "   loaded $label ($hour:$minute Sun,Mon,Tue)"
 }
 
 echo "==> launchd agents"
@@ -74,4 +74,4 @@ launchctl list | grep botbookyoucourt || true
 echo "==> auth smoke test (hits TU API from this machine)"
 ( cd "$REPO" && bun src/index.ts status ) || echo "!! status failed — check .env creds / network"
 
-echo "==> done. race Sun,Mon 06:55 | fallback Sun,Mon 07:10"
+echo "==> done. race Sun,Mon,Tue 06:55 | fallback Sun,Mon,Tue 07:10"

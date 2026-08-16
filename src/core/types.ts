@@ -29,10 +29,14 @@ export const configSchema = z.object({
   schedule: z
     .array(z.object({ days: z.array(weekdaySchema).min(1), slots: z.array(slotSchema).min(1) }))
     .min(1),
+  advanceDaysCandidates: z.array(z.number().int().min(0).max(14)).min(1).default([5, 6]),
   race: z.object({
     fireAt: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
     deadline: z.string().regex(/^\d{2}:\d{2}:\d{2}$/),
-    retryDelayMs: z.number().int().min(50),
+    accountIntervalMs: z.number().int().min(50).default(2000),
+    ipIntervalMs: z.number().int().min(50).default(1000),
+    rateLimitBackoffMs: z.number().int().min(0).default(5000),
+    gatePollIntervalMs: z.number().int().min(100).default(2000),
     requestTimeoutMs: z.number().int().min(500).default(8000),
     authAttempts: z.number().int().min(1).default(3),
     authRetryDelayMs: z.number().int().min(50).default(300),

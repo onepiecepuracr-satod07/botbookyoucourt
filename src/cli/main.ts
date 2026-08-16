@@ -11,10 +11,10 @@ import {
   type GatewayFactory,
 } from '../app/auth.js';
 import { loadConfig, loadCredentials } from '../app/config.js';
-import { executePlan } from '../app/executor.js';
+import { executeRace } from '../app/executor.js';
 import { formatIso, type IctDate, ictInstantToday, ictToday, parseIso } from '../core/ict.js';
 import { type BookingMark, mergeMarks, pendingTasks } from '../core/marker.js';
-import { buildPlan, type Plan } from '../core/planner.js';
+import { type BookingTask, buildPlan, type Plan } from '../core/planner.js';
 import type { BookingGateway } from '../core/ports.js';
 import { COURT_IDS, type Config, type Credentials } from '../core/types.js';
 
@@ -81,21 +81,29 @@ function authOptions(config: Config): AuthOptions {
   };
 }
 
-function resolvePlan(
+function resolvePlans(
   config: Config,
   credentials: readonly Credentials[],
   dateOverride: IctDate | null,
-): Plan | null {
+): Plan[] {
+  const today = ictToday();
   if (dateOverride) {
-    const today = ictToday();
     const diffDays = Math.round(
       (Date.UTC(dateOverride.year, dateOverride.month - 1, dateOverride.day) -
         Date.UTC(today.year, today.month - 1, today.day)) /
         86_400_000,
     );
-    return buildPlan(config, credentials, today, diffDays);
+    const plan = buildPlan(config, credentials, today, diffDays);
+    return plan ? [plan] : [];
   }
-  return buildPlan(config, credentials);
+  const plans: Plan[] = [];
+  for (const advanceDays of config.advanceDaysCandidates) {
+    const plan = buildPlan(config, credentials, today, advanceDays);
+    if (plan && !plans.some((p) => formatIso(p.targetDate) === formatIso(plan.targetDate))) {
+      plans.push(plan);
+    }
+  }
+  return plans;
 }
 
 function describePlan(plan: Plan): string {
@@ -110,36 +118,51 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
   const store = createFileBookingStore(join(process.cwd(), 'state'));
   const notifier = createTelegramNotifier(config.notify.telegram);
   const credentials = loadCredentials(config, log.warn);
-  const plan = resolvePlan(config, credentials, args.date);
   const today = ictToday();
-  if (!plan || plan.tasks.length === 0) {
-    log.info(`no schedule entry for target day (today ${formatIso(today)} +6) — exiting`);
+  const plans = resolvePlans(config, credentials, args.date);
+  if (plans.length === 0) {
+    log.info(
+      `no schedule entry for candidate target days (today ${formatIso(today)} +${config.advanceDaysCandidates.join('/+')}) — exiting`,
+    );
     return;
   }
 
-  const header = `🎾 BookYourCourt ${formatIso(plan.targetDate)}`;
-  const marks = await store.load(plan.targetDate);
-  const pending = pendingTasks(plan.tasks, marks);
+  const header = `🎾 BookYourCourt ${plans.map((p) => formatIso(p.targetDate)).join(', ')}`;
+  const alreadyBooked: string[] = [];
+  const pendingPlans: { targetDate: IctDate; tasks: BookingTask[]; marks: BookingMark[] }[] = [];
+  for (const plan of plans) {
+    const marks = await store.load(plan.targetDate);
+    alreadyBooked.push(
+      ...marks.map(
+        (m) =>
+          `✅ ${formatIso(plan.targetDate)} ${m.account} ${m.hour}:00 court ${m.courtNumber} (${m.bookingCode}) [already booked]`,
+      ),
+    );
+    const pending = pendingTasks(plan.tasks, marks);
+    if (pending.length > 0) pendingPlans.push({ targetDate: plan.targetDate, tasks: pending, marks });
+  }
 
-  if (pending.length === 0) {
-    const summary = marks
-      .map((m) => `✅ ${m.account} ${m.hour}:00 court ${m.courtNumber} (${m.bookingCode}) [already booked]`)
-      .join('\n');
-    log.info(`all tasks already booked for ${formatIso(plan.targetDate)} — skipping`);
-    await notifier.notify(`${header}\n${summary}`);
+  if (pendingPlans.length === 0) {
+    log.info('all tasks already booked for every candidate date — skipping');
+    await notifier.notify(`${header}\n${alreadyBooked.join('\n')}`);
     return;
   }
 
-  if (marks.length > 0) log.info(`skipping ${marks.length} already-booked task(s)`);
-  log.info(`plan:\n${describePlan({ targetDate: plan.targetDate, tasks: pending })}`);
+  if (alreadyBooked.length > 0) log.info(`skipping ${alreadyBooked.length} already-booked task(s)`);
+  log.info(
+    `plan:\n${pendingPlans.map((p) => describePlan({ targetDate: p.targetDate, tasks: p.tasks })).join('\n')}`,
+  );
 
-  const pendingCreds = credentials.filter((c) => pending.some((t) => t.credentials.name === c.name));
+  const neededAccounts = new Set(pendingPlans.flatMap((p) => p.tasks.map((t) => t.credentials.name)));
+  const pendingCreds = credentials.filter((c) => neededAccounts.has(c.name));
   const { clients, failed } = await authenticateAvailable(pendingCreds, gatewayFactory, authOptions(config));
   if (clients.size === 0) {
     const detail = failed.map((f) => `${f.name} (${f.reason})`).join(', ');
     throw new Error(`all account authentications failed: ${detail}`);
   }
-  const bookable = pending.filter((t) => clients.has(t.credentials.name));
+  const bookablePlans = pendingPlans
+    .map((p) => ({ ...p, tasks: p.tasks.filter((t) => clients.has(t.credentials.name)) }))
+    .filter((p) => p.tasks.length > 0);
   if (failed.length > 0) {
     log.warn(`proceeding without ${failed.length} account(s): ${failed.map((f) => f.name).join(', ')}`);
   }
@@ -153,37 +176,44 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
     }
   }
 
-  const deadline = args.now ? new Date(Date.now() + 60_000) : ictInstantToday(today, config.race.deadline);
+  const deadline = args.now ? new Date(Date.now() + 120_000) : ictInstantToday(today, config.race.deadline);
 
-  const results = await executePlan(
-    clients,
-    bookable,
-    plan.targetDate,
-    today,
+  const results = await executeRace(clients, bookablePlans, today, {
     deadline,
-    config.race.retryDelayMs,
-  );
+    accountIntervalMs: config.race.accountIntervalMs,
+    ipIntervalMs: config.race.ipIntervalMs,
+    rateLimitBackoffMs: config.race.rateLimitBackoffMs,
+    gatePollIntervalMs: config.race.gatePollIntervalMs,
+  });
 
-  const newMarks: BookingMark[] = [];
-  for (const r of results) {
-    if (r.ok && r.courtNumber !== undefined && r.bookingCode !== undefined) {
-      newMarks.push({
-        account: r.account,
-        hour: r.hour,
-        courtNumber: r.courtNumber,
-        bookingCode: r.bookingCode,
-      });
+  for (const plan of bookablePlans) {
+    const newMarks: BookingMark[] = [];
+    for (const r of results) {
+      if (
+        r.ok &&
+        formatIso(r.targetDate) === formatIso(plan.targetDate) &&
+        r.courtNumber !== undefined &&
+        r.bookingCode !== undefined
+      ) {
+        newMarks.push({
+          account: r.account,
+          hour: r.hour,
+          courtNumber: r.courtNumber,
+          bookingCode: r.bookingCode,
+        });
+      }
     }
+    if (newMarks.length > 0) await store.save(plan.targetDate, mergeMarks(plan.marks, newMarks));
   }
-  if (newMarks.length > 0) await store.save(plan.targetDate, mergeMarks(marks, newMarks));
 
   const summary = [
     ...results.map((r) =>
       r.ok
-        ? `✅ ${r.account} ${r.hour}:00 court ${r.courtNumber} (${r.bookingCode})`
-        : `❌ ${r.account} ${r.hour}:00 — ${r.reason}`,
+        ? `✅ ${formatIso(r.targetDate)} ${r.account} ${r.hour}:00 court ${r.courtNumber} (${r.bookingCode})`
+        : `❌ ${formatIso(r.targetDate)} ${r.account} ${r.hour}:00 — ${r.reason}`,
     ),
     ...failed.map((f) => `⚠️ ${f.name} — auth failed after retries: ${f.reason}`),
+    ...alreadyBooked,
   ].join('\n');
   log.info(`results:\n${summary}`);
   await notifier.notify(`${header}\n${summary}`);
@@ -193,14 +223,16 @@ async function commandRun(config: Config, args: CliArgs): Promise<void> {
 
 async function commandDryRun(config: Config, args: CliArgs): Promise<void> {
   const credentials = loadCredentials(config, log.warn);
-  const plan = resolvePlan(config, credentials, args.date);
-  if (!plan) {
-    log.info('no schedule entry for target day — nothing to do');
+  const plans = resolvePlans(config, credentials, args.date);
+  if (plans.length === 0) {
+    log.info('no schedule entry for candidate target days — nothing to do');
     return;
   }
-  log.info(`DRY RUN — would execute:\n${describePlan(plan)}`);
+  log.info(`DRY RUN — would execute:\n${plans.map(describePlan).join('\n')}`);
   const clients = await authenticateAll(credentials, gatewayFactory, authOptions(config));
-  await printAvailability(clients, plan.targetDate);
+  for (const plan of plans) {
+    await printAvailability(clients, plan.targetDate);
+  }
 }
 
 async function commandStatus(config: Config, args: CliArgs): Promise<void> {

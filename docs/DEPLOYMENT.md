@@ -23,8 +23,8 @@ TU API `bookyourcourtapi.psm.tu.ac.th` (49.229.83.38) **บล็อก IP ต�
 
 | agent | เวลา | คำสั่ง | หน้าที่ |
 |---|---|---|---|
-| `com.botbookyoucourt.race` | Sun,Mon 06:55 | `run` | pre-auth แล้วรอถึง `fireAt` 06:59:58 → ยิง retry ทุก 500ms จนถึง `deadline` 07:02 |
-| `com.botbookyoucourt.fallback` | Sun,Mon 07:10 | `run --now` | เก็บตกถ้า race แพ้ (demand ต่ำ คอร์ตมักว่างถึง ~08:24) |
+| `com.botbookyoucourt.race` | Sun,Mon,Tue 06:55 | `run` | pre-auth แล้วรอถึง `fireAt` 07:00:00 → gate ด้วย `listCourts` จนวันเป้าหมายเปิด → ยิงแบบ paced (2s/account, 1s/IP) จนถึง `deadline` 07:05 |
+| `com.botbookyoucourt.fallback` | Sun,Mon,Tue 07:10 | `run --now` | เก็บตกถ้า race แพ้ (demand ต่ำ คอร์ตมักว่างถึง ~08:24) |
 
 กลไกกันพลาด:
 - **Single-instance lock** — `run.sh` จับ `state/.run.lock` (`mkdir` atomic + เช็ค pid stale) ก่อนรัน. ถ้ามี instance อื่นถืออยู่ → `exit 0` เงียบ (ไม่ ping healthcheck fail). กันเคส 2 process ยิงชนกัน (agent ซ้ำ / fallback ทับ race ที่ยังค้าง) ที่จะทำให้บอทจองแข่งกันเองจน quota เต็ม แล้วรายงาน false-`❌`.
@@ -32,7 +32,9 @@ TU API `bookyourcourtapi.psm.tu.ac.th` (49.229.83.38) **บล็อก IP ต�
 - **Telegram** — แจ้งผลทุกครั้ง (✅/❌) + แจ้ง crash. เงียบ = ผิดปกติ.
 - **Dead-man switch (healthchecks.io)** — `run.sh` ping `/start` + success + `/$code`. ถ้าเครื่องตาย/agent ไม่ยิง → healthchecks ไม่ได้ ping ตาม cron → เด้งเตือนเอง.
 
-เวลา race ตั้งใน `config.json` → `race.fireAt` / `race.deadline` / `race.retryDelayMs`. วัน/slot/ลำดับ court อยู่ใน `config.json` → `schedule`.
+เวลา race ตั้งใน `config.json` → `race.fireAt` / `race.deadline`. จังหวะยิงคุมด้วย `race.accountIntervalMs` (ช่องว่างขั้นต่ำต่อ account) / `race.ipIntervalMs` (ต่อ IP รวมทุก account) / `race.rateLimitBackoffMs` (โดน "จองถี่เกินไป" → หยุดพักเพิ่ม) / `race.gatePollIntervalMs` (ความถี่ poll เช็คว่าวันเป้าหมายเปิดหรือยัง). วันเป้าหมายมาจาก `advanceDaysCandidates` (default `[5,6]` — ตั้งแต่ 2026-08 window จริงไม่แน่ชัด บอทเลย race ทุก candidate ที่ตรง `schedule`). วัน/slot/ลำดับ court อยู่ใน `config.json` → `schedule`.
+
+> **Issue #5 (2026-08-16):** server เพิ่ม anti-bot rate limit ("จองถี่เกินไป / Booking too frequent") และวัน D+6 ไม่เปิดตอน 07:00 อีกต่อไป. บอทเดิมยิง ~13 req/s ใส่วันที่ยังไม่เปิด → โดนบล็อกยกกระบิ. แก้โดย: gate ด้วย `listCourts` ก่อนยิงจริง + pacing สุภาพ + backoff เมื่อโดน limit + race ทั้ง D+5 และ D+6.
 
 ## 3. Setup บน Mac mini
 
@@ -119,7 +121,9 @@ marker: ลบ `state/booked-<date>.json` ถ้าต้องการบั�
 | `❌ ... token` ทุก account | creds ใน `.env` ผิด/หมดอายุ | อัปเดต `.env`, ทดสอบ `bun src/index.ts status` |
 | `self signed certificate in certificate chain` ทุก request (TU + Telegram พร้อมกัน) | เครื่องมี corporate MITM proxy (เช่น Netskope/Zscaler) — bun ไม่ trust CA ของ proxy | อย่ารัน bot บนเครื่องทำงาน; ถ้าจำเป็นชั่วคราว: export CA ของ proxy เป็น .pem แล้วตั้ง `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` ใน plist/run.sh |
 | `CreateOrEdit: Internal server error` ทั้งที่ auth ผ่าน | user TU ของ account นั้นหมดอายุ (ไม่มีสิทธิ์จอง) | ต่ออายุ user กับ TU; ระหว่างรอ เอา account ออกจาก `config.json` กัน bot ยิง 500 ฟรี |
-| log `no attempt made` | run เริ่มหลัง `deadline` 07:02 (เครื่องหลับแล้ว launchd ยิงตอนตื่น) | เช็ค pmset (แถวล่าง) + ต้องมี fallback agent 07:10 (`launchctl list \| grep botbook` ต้องเห็น 2 ตัว) |
+| log `no attempt made` | run เริ่มหลัง `deadline` 07:05 (เครื่องหลับแล้ว launchd ยิงตอนตื่น) | เช็ค pmset (แถวล่าง) + ต้องมี fallback agent 07:10 (`launchctl list \| grep botbook` ต้องเห็น 2 ตัว) |
+| `❌ ... จองถี่เกินไป / Booking too frequent` ซ้ำๆ | โดน anti-bot rate limit — pacing ยังถี่เกิน limit ปัจจุบันของ server | เพิ่ม `race.accountIntervalMs`/`ipIntervalMs` ใน `config.json`; log จะมี `[code=... http=...]` ท้าย error ไว้ investigate |
+| `❌ ... booking window ... never opened before deadline` | วันเป้าหมายไม่เปิดในช่วง race — window ของ server เปลี่ยนอีก | เช็คด้วย `bun run status --date <date>` ว่าวันไหนคืนตาราง court แล้วปรับ `advanceDaysCandidates`/launchd days |
 | จองไม่ได้แต่ไม่มี error ชัด | slot ถูกคนอื่นแย่ง (race แพ้) | fallback 07:10 เก็บตก; ถ้ายัง = จองมือ |
 | log ซ้ำทุกบรรทัด 2 รอบ / จองสำเร็จแล้วยังได้ `❌ FAILED` | มี launchd agent ซ้ำยิงเวลาเดียวกัน → 2 instance ชนกันเอง จน quota เต็ม (issue #4) | `launchctl print gui/$(id -u) \| grep book` ต้องเหลือแค่ `race`+`fallback`; ลบ agent เกิน (`launchctl bootout gui/$(id -u)/<label>` + `rm ~/Library/LaunchAgents/<label>.plist`). `run.sh` มี lock กันชั้นสองแล้ว |
 | เครื่องหลับตอน 06:55 | pmset ไม่ได้ตั้ง / เครื่องรีบูตแล้วไม่ auto-login | `pmset -g \| grep sleep` ต้อง 0; เปิด auto-login |
@@ -127,8 +131,8 @@ marker: ลบ `state/booked-<date>.json` ถ้าต้องการบั�
 
 ## 7. อ้างอิง
 
-- **Schedule:** run **Sun** (จองคอร์ตเสาร์) + **Mon** (จองคอร์ตอาทิตย์). booking window = target `today+6` (slot เปิด 07:00 ICT ล่วงหน้า 6 วัน).
-- **Race timing** (`config.json`): pre-auth ตอน agent ตื่น 06:55 → `fireAt` 06:59:58 → retry ทุก 500ms → `deadline` 07:02.
+- **Schedule:** run **Sun,Mon,Tue** — แต่ละ run race ทุก candidate `today+5` / `today+6` ที่ weekday ตรง `schedule` (window จริงไม่แน่ชัดตั้งแต่ 2026-08, gate เป็นตัวตัดสินว่าวันไหนเปิด).
+- **Race timing** (`config.json`): pre-auth ตอน agent ตื่น 06:55 → `fireAt` 07:00:00 → gate ด้วย `listCourts` → ยิง paced 2s/account จนถึง `deadline` 07:05.
 - **Play slot:** Sat+Sun 17:00–19:00, court priority `[5, 4, any]` (2 ชม. = 2 accounts เพราะ 1 จอง/user/วัน).
 - **Court map:** 01→39, 02→40, 03→41, 04→51, 05→52 · `sportTypeId=3` · `sportStationId=4`.
 - **Grid values:** `1`=ว่าง, `-1`=ถูกจอง, `null`/`.`=ปิด.

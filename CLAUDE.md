@@ -51,14 +51,16 @@ Tests colocate as `*.test.ts` next to source. Focus on `core/` (pure, determinis
 
 ## Domain rules (drive most logic)
 
-- Booking opens **6 days ahead**: slots for day D open at 07:00 ICT on D−6. `buildPlan` defaults `advanceDays=6`; the bot exits if today+6 isn't in `config.json`'s schedule. Hence launchd runs Sun+Mon (books Sat+Sun courts).
+- Booking window is **uncertain since 2026-08** (was D−6 at 07:00 ICT; evidence now points to D−5): the bot races every candidate in `config.json` → `advanceDaysCandidates` (default `[5, 6]`) whose weekday is in `schedule`. Hence launchd runs Sun+Mon+Tue.
+- Each target date has a **window gate**: `executeRace` polls read-only `listCourts` until the date returns court rows before firing any `CreateOrEdit` (issue #5: firing at an unopened date burned quota and tripped the rate limiter).
+- The API **rate-limits `CreateOrEdit`** ("จองถี่เกินไป / Booking too frequent"). `RequestPacer` enforces `race.accountIntervalMs` per account + `race.ipIntervalMs` across accounts; a rate-limit error adds `race.rateLimitBackoffMs` penalty. Don't make the bot hammer again.
 - 1 account = 1 hour/day max → a 2-hour block requires 2 accounts (`config.json` accounts + `TU_A_`/`TU_B_` env prefixes).
-- Court number → API court id: 01→39, 02→40, 03→41, 04→51, 05→52 (map in `core/types.ts`).
-- Race timing (`config.json` → `race`): fire slightly before 07:00 (`fireAt: 06:59:58`), retry until `deadline`.
+- Court number → API court id: 01→39, 02→40, 03→41, 04→51, 05→52 (map in `core/types.ts`). A court answering "ปิดทำการ" while the window is open is dropped from that task's rotation.
+- Race timing (`config.json` → `race`): `fireAt: 07:00:00`, gate + paced retries until `deadline: 07:05:00`.
 
 ## Deployment / ops
 
-Production = launchd on Mac mini: `com.botbookyoucourt.race` (Sun,Mon 06:55) + `com.botbookyoucourt.fallback` (Sun,Mon 07:10). Bootstrap with `zsh scripts/setup-macmini.sh`. Verify with `zsh scripts/test-schedule.sh` (safe dry-run) or `--live` (kickstarts fallback agent). `scripts/run.sh` pings healthchecks.io (dead-man switch). Full runbook: `docs/DEPLOYMENT.md`.
+Production = launchd on Mac mini: `com.botbookyoucourt.race` (Sun,Mon,Tue 06:55) + `com.botbookyoucourt.fallback` (Sun,Mon,Tue 07:10). Bootstrap with `zsh scripts/setup-macmini.sh`. Verify with `zsh scripts/test-schedule.sh` (safe dry-run) or `--live` (kickstarts fallback agent). `scripts/run.sh` pings healthchecks.io (dead-man switch). Full runbook: `docs/DEPLOYMENT.md`.
 
 ## Notes
 
